@@ -1,0 +1,16 @@
+{
+  "name": "timerex-availability",
+  "version": "1.0.0",
+  "description": "複数TimerexのURLから空き時間を集約して表示するシステム",
+  "scripts": {
+    "dev": "vercel dev",
+    "scrape": "node lib/scraper.js"
+  },
+  "dependencies": {
+    "playwright": "^1.40.0",
+    "node-cron": "^3.0.3"
+  },
+  "devDependencies": {
+    "vercel": "^33.0.0"
+  }
+}

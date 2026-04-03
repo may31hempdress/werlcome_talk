@@ -1,0 +1,612 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ご予約 | スタッフ空き時間</title>
+<style>
+/* ========================================
+   リセット & ベース
+======================================== */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg: #f7f6f3;
+  --surface: #ffffff;
+  --border: rgba(0,0,0,.1);
+  --border-strong: rgba(0,0,0,.18);
+  --text: #1a1a1a;
+  --text-muted: #6b6b6b;
+  --text-faint: #9e9e9e;
+  --green-dark: #0F6E56;
+  --green-mid: #1D9E75;
+  --green-light: #5DCAA5;
+  --green-pale: #E1F5EE;
+  --radius: 10px;
+  --shadow: 0 2px 12px rgba(0,0,0,.08);
+  --shadow-lg: 0 8px 32px rgba(0,0,0,.14);
+}
+
+body {
+  font-family: 'Hiragino Koto Mincho', 'Hiragino Sans', 'Noto Sans JP', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  padding: 0;
+}
+
+/* ========================================
+   ヘッダー
+======================================== */
+header {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: 16px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.logo { font-size: 15px; font-weight: 600; letter-spacing: .02em; }
+.header-sub { font-size: 12px; color: var(--text-muted); }
+
+/* ========================================
+   メインコンテナ
+======================================== */
+main {
+  max-width: 780px;
+  margin: 0 auto;
+  padding: 24px 16px 60px;
+}
+
+.page-title { font-size: 20px; font-weight: 600; margin-bottom: 4px; }
+.page-sub { font-size: 13px; color: var(--text-muted); margin-bottom: 20px; }
+
+/* ========================================
+   ローディング
+======================================== */
+#loading {
+  text-align: center;
+  padding: 60px 0;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+.spinner {
+  width: 28px; height: 28px;
+  border: 3px solid var(--border);
+  border-top-color: var(--green-mid);
+  border-radius: 50%;
+  animation: spin .7s linear infinite;
+  margin: 0 auto 12px;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ========================================
+   週ナビ
+======================================== */
+.week-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+  gap: 8px;
+}
+.nav-btn {
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  padding: 6px 14px;
+  font-size: 13px;
+  cursor: pointer;
+  color: var(--text);
+  transition: background .12s;
+  white-space: nowrap;
+}
+.nav-btn:hover { background: #f0efec; }
+.nav-btn:disabled { opacity: .35; cursor: not-allowed; }
+.week-label { font-size: 14px; font-weight: 600; text-align: center; flex: 1; }
+
+/* ========================================
+   凡例
+======================================== */
+.legend {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.legend-item { display: flex; align-items: center; gap: 5px; }
+.legend-dot { width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }
+
+/* ========================================
+   カレンダーグリッド
+======================================== */
+.cal-wrap {
+  background: var(--surface);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  overflow: hidden;
+  box-shadow: var(--shadow);
+}
+.cal-grid {
+  display: grid;
+  grid-template-columns: 52px repeat(5, 1fr);
+}
+
+/* ヘッダー行 */
+.cal-head-empty { background: #fafaf8; border-bottom: 1px solid var(--border); }
+.cal-head {
+  background: #fafaf8;
+  border-bottom: 1px solid var(--border);
+  border-left: 1px solid var(--border);
+  text-align: center;
+  padding: 8px 4px;
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 600;
+  line-height: 1.5;
+}
+.cal-head.today { color: var(--green-dark); }
+
+/* 時間ラベル */
+.time-label {
+  font-size: 10px;
+  color: var(--text-faint);
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  padding: 4px 6px 0 0;
+  height: 40px;
+  border-top: 1px solid #f0efec;
+}
+
+/* セル */
+.cal-cell {
+  height: 40px;
+  border-top: 1px solid #f0efec;
+  border-left: 1px solid #f0efec;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 600;
+  transition: transform .1s, filter .1s;
+  position: relative;
+  cursor: default;
+}
+.cal-cell.empty { background: transparent; }
+.cal-cell.a1 { background: var(--green-pale); color: var(--green-dark); cursor: pointer; }
+.cal-cell.a2 { background: #9FE1CB; color: #04342C; cursor: pointer; }
+.cal-cell.a3 { background: var(--green-light); color: #04342C; cursor: pointer; }
+.cal-cell.a4 { background: #2DB88A; color: #fff; cursor: pointer; }
+.cal-cell.a5plus { background: var(--green-mid); color: #fff; cursor: pointer; }
+
+.cal-cell.a1:hover,.cal-cell.a2:hover,.cal-cell.a3:hover,
+.cal-cell.a4:hover,.cal-cell.a5plus:hover {
+  filter: brightness(.92);
+  transform: scale(1.06);
+  z-index: 1;
+}
+
+/* ========================================
+   ツールチップ
+======================================== */
+#tooltip {
+  position: fixed;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  padding: 10px 13px;
+  font-size: 12px;
+  box-shadow: var(--shadow-lg);
+  pointer-events: none;
+  z-index: 500;
+  min-width: 150px;
+  max-width: 240px;
+  opacity: 0;
+  transform: translateY(5px);
+  transition: opacity .13s, transform .13s;
+}
+#tooltip.show { opacity: 1; transform: translateY(0); }
+.tt-header {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin-bottom: 7px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+.tt-member {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 5px;
+}
+.tt-avatar {
+  width: 22px; height: 22px;
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 9px; font-weight: 700;
+  flex-shrink: 0;
+}
+.tt-name { font-size: 12px; line-height: 1.3; }
+.tt-cal { font-size: 10px; color: var(--text-faint); }
+.tt-hint {
+  font-size: 10px;
+  color: var(--text-faint);
+  margin-top: 7px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+}
+
+/* ========================================
+   最終更新
+======================================== */
+.last-updated {
+  text-align: center;
+  font-size: 11px;
+  color: var(--text-faint);
+  margin-top: 12px;
+}
+.refresh-btn {
+  background: none;
+  border: none;
+  color: var(--green-dark);
+  font-size: 11px;
+  cursor: pointer;
+  text-decoration: underline;
+  padding: 0;
+}
+
+/* ========================================
+   モーダル
+======================================== */
+.overlay {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,.45);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 900;
+  opacity: 0; pointer-events: none;
+  transition: opacity .18s;
+}
+.overlay.open { opacity: 1; pointer-events: all; }
+.modal {
+  background: var(--surface);
+  border-radius: 16px;
+  padding: 22px;
+  width: min(360px, 93vw);
+  box-shadow: var(--shadow-lg);
+  transform: translateY(8px);
+  transition: transform .18s;
+}
+.overlay.open .modal { transform: translateY(0); }
+.modal-top { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 2px; }
+.modal-title { font-size: 16px; font-weight: 600; }
+.modal-sub { font-size: 12px; color: var(--text-muted); margin-bottom: 14px; }
+.close-btn { background: none; border: none; font-size: 20px; cursor: pointer; color: var(--text-muted); line-height: 1; }
+
+.assignee {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 10px;
+  border-radius: 9px;
+  cursor: pointer;
+  border: 1.5px solid transparent;
+  transition: all .12s;
+  margin-bottom: 7px;
+}
+.assignee:hover { background: #f7f6f3; }
+.assignee.selected { background: var(--green-pale); border-color: var(--green-mid); }
+.a-avatar { width: 34px; height: 34px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; flex-shrink: 0; }
+.a-name { font-size: 13px; font-weight: 600; }
+.a-cal { font-size: 11px; color: var(--text-muted); }
+.check { margin-left: auto; color: var(--green-mid); font-size: 18px; opacity: 0; transition: opacity .1s; }
+.assignee.selected .check { opacity: 1; }
+
+.go-btn {
+  width: 100%; padding: 12px;
+  border: none; border-radius: 9px;
+  background: var(--green-mid); color: #fff;
+  font-size: 14px; font-weight: 600;
+  cursor: pointer; margin-top: 6px;
+  transition: background .12s;
+  letter-spacing: .02em;
+}
+.go-btn:hover { background: var(--green-dark); }
+.go-btn:disabled { background: #ccc; color: #888; cursor: not-allowed; }
+
+/* ========================================
+   エラー
+======================================== */
+#error-msg {
+  display: none;
+  background: #fff3f3;
+  border: 1px solid #f5c1c1;
+  border-radius: 8px;
+  padding: 14px 16px;
+  font-size: 13px;
+  color: #a32d2d;
+  margin-bottom: 16px;
+}
+
+/* ========================================
+   レスポンシブ
+======================================== */
+@media (max-width: 480px) {
+  .cal-grid { grid-template-columns: 40px repeat(5, 1fr); }
+  .time-label { font-size: 9px; padding: 4px 4px 0 0; }
+  .cal-cell { height: 36px; font-size: 9px; }
+}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">ご予約</div>
+  <div class="header-sub">担当スタッフの空き時間</div>
+</header>
+
+<main>
+  <h1 class="page-title">空き時間を選んでご予約ください</h1>
+  <p class="page-sub">誰かしら空いている時間帯が表示されます。クリックして担当者を選択し、Timerexで予約を確定してください。</p>
+
+  <div id="error-msg"></div>
+
+  <div id="loading">
+    <div class="spinner"></div>
+    空き時間を読み込み中です...
+  </div>
+
+  <div id="calendar-area" style="display:none">
+    <div class="week-nav">
+      <button class="nav-btn" id="btn-prev" onclick="changeWeek(-1)">← 前週</button>
+      <span class="week-label" id="week-label"></span>
+      <button class="nav-btn" id="btn-next" onclick="changeWeek(1)">次週 →</button>
+    </div>
+
+    <div class="legend">
+      <span class="legend-item"><span class="legend-dot" style="background:var(--green-pale);border:1px solid #9FE1CB"></span>1名空き</span>
+      <span class="legend-item"><span class="legend-dot" style="background:#9FE1CB"></span>2名空き</span>
+      <span class="legend-item"><span class="legend-dot" style="background:var(--green-light)"></span>3〜4名空き</span>
+      <span class="legend-item"><span class="legend-dot" style="background:var(--green-mid)"></span>5名以上</span>
+    </div>
+
+    <div class="cal-wrap">
+      <div class="cal-grid" id="cal-grid"></div>
+    </div>
+
+    <p class="last-updated" id="last-updated"></p>
+  </div>
+</main>
+
+<!-- ツールチップ -->
+<div id="tooltip">
+  <div class="tt-header" id="tt-header"></div>
+  <div id="tt-body"></div>
+  <div class="tt-hint">クリックして予約する</div>
+</div>
+
+<!-- モーダル -->
+<div class="overlay" id="overlay">
+  <div class="modal">
+    <div class="modal-top">
+      <div class="modal-title" id="modal-title"></div>
+      <button class="close-btn" onclick="closeModal()">✕</button>
+    </div>
+    <div class="modal-sub">担当者を選択してください</div>
+    <div id="assignee-list"></div>
+    <button class="go-btn" id="go-btn" disabled onclick="goToTimerex()">Timerexで予約する →</button>
+  </div>
+</div>
+
+<script>
+// ============================================================
+// 設定: 本番では /api/availability に変更してください
+// ローカル開発中は vercel dev で http://localhost:3000/api/availability
+// ============================================================
+const API_URL = '/api/availability';
+
+// ============================================================
+// 状態管理
+// ============================================================
+let members = [];
+let slotMap = {}; // { 'YYYY-MM-DDTHH:MM': [memberId, ...] }
+let weekOffset = 0;
+let selectedMemberId = null;
+let currentSlot = null;
+
+const DAY_JP = ['月','火','水','木','金'];
+const TIMES_30MIN = [];
+for (let h = 9; h <= 18; h++) {
+  TIMES_30MIN.push(`${String(h).padStart(2,'0')}:00`);
+  if (h < 18) TIMES_30MIN.push(`${String(h).padStart(2,'0')}:30`);
+}
+
+// ============================================================
+// API取得
+// ============================================================
+async function fetchAvailability() {
+  try {
+    const res = await fetch(API_URL);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    members = data.members || [];
+    slotMap = data.slots || {};
+
+    if (data.lastUpdated) {
+      const d = new Date(data.lastUpdated);
+      document.getElementById('last-updated').innerHTML =
+        `最終更新: ${d.toLocaleString('ja-JP')} &nbsp;·&nbsp; <button class="refresh-btn" onclick="location.reload()">更新</button>`;
+    }
+
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('calendar-area').style.display = 'block';
+    renderCalendar();
+
+  } catch (err) {
+    document.getElementById('loading').style.display = 'none';
+    const errEl = document.getElementById('error-msg');
+    errEl.style.display = 'block';
+    errEl.textContent = `データの取得に失敗しました: ${err.message}`;
+    console.error(err);
+  }
+}
+
+// ============================================================
+// カレンダー描画
+// ============================================================
+function getWeekDates(off = 0) {
+  const t = new Date();
+  const m = new Date(t);
+  m.setDate(t.getDate() - t.getDay() + 1 + off * 7);
+  return Array.from({ length: 5 }, (_, i) => {
+    const d = new Date(m);
+    d.setDate(m.getDate() + i);
+    return d;
+  });
+}
+
+function toDatetimeKey(date, time) {
+  const y = date.getFullYear();
+  const mo = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${mo}-${d}T${time}`;
+}
+
+function renderCalendar() {
+  const dates = getWeekDates(weekOffset);
+  const today = new Date();
+
+  // 週ラベル更新
+  const fmt = d => `${d.getMonth() + 1}/${d.getDate()}`;
+  document.getElementById('week-label').textContent =
+    `${fmt(dates[0])} (月) 〜 ${fmt(dates[4])} (金)`;
+
+  // 前週ボタン: 今週より前には戻れない
+  document.getElementById('btn-prev').disabled = (weekOffset <= 0);
+
+  const grid = document.getElementById('cal-grid');
+  let html = '<div class="cal-head-empty"></div>';
+
+  // ヘッダー行
+  dates.forEach((d, i) => {
+    const isToday = d.toDateString() === today.toDateString();
+    html += `<div class="cal-head${isToday ? ' today' : ''}">${DAY_JP[i]}<br>${d.getMonth() + 1}/${d.getDate()}</div>`;
+  });
+
+  // 時間 × 日
+  TIMES_30MIN.forEach(time => {
+    html += `<div class="time-label">${time}</div>`;
+    dates.forEach((d, di) => {
+      const key = toDatetimeKey(d, time);
+      const availIds = slotMap[key] || [];
+      const count = availIds.length;
+      const isPast = d < today && time < `${String(today.getHours()).padStart(2,'0')}:${String(today.getMinutes()).padStart(2,'0')}`;
+
+      if (count === 0 || isPast) {
+        html += `<div class="cal-cell empty"></div>`;
+      } else {
+        const cls = count === 1 ? 'a1' : count === 2 ? 'a2' : count <= 4 ? 'a3' : count <= 6 ? 'a4' : 'a5plus';
+        const idsJson = encodeURIComponent(JSON.stringify(availIds));
+        const dateStr = `${d.getMonth() + 1}/${d.getDate()}`;
+        html += `<div class="cal-cell ${cls}"
+          data-key="${key}"
+          data-ids="${idsJson}"
+          data-date="${dateStr}"
+          data-day="${DAY_JP[di]}"
+          data-time="${time}"
+          onmouseenter="showTip(event,this)"
+          onmouseleave="hideTip()"
+          onclick="openModal(this)">${count}名</div>`;
+      }
+    });
+  });
+
+  grid.innerHTML = html;
+}
+
+function changeWeek(dir) {
+  weekOffset += dir;
+  renderCalendar();
+}
+
+// ============================================================
+// ツールチップ
+// ============================================================
+const tip = document.getElementById('tooltip');
+
+function showTip(e, el) {
+  const ids = JSON.parse(decodeURIComponent(el.dataset.ids));
+  const ms = ids.map(id => members.find(m => m.id === id)).filter(Boolean);
+  document.getElementById('tt-header').textContent =
+    `${el.dataset.date} (${el.dataset.day}) ${el.dataset.time} 〜`;
+  document.getElementById('tt-body').innerHTML = ms.map(m => `
+    <div class="tt-member">
+      <div class="tt-avatar" style="background:${m.bg};color:${m.color}">${m.initial}</div>
+      <div><div class="tt-name">${m.name}</div><div class="tt-cal">${m.calName}</div></div>
+    </div>`).join('');
+  moveTip(e);
+  tip.classList.add('show');
+}
+function moveTip(e) {
+  const tw = tip.offsetWidth || 200, th = tip.offsetHeight || 120;
+  const x = e.clientX + 14, y = e.clientY - 10;
+  tip.style.left = (x + tw > window.innerWidth - 8 ? x - tw - 22 : x) + 'px';
+  tip.style.top  = (y + th > window.innerHeight - 8 ? y - th - 8 : y) + 'px';
+}
+function hideTip() { tip.classList.remove('show'); }
+document.addEventListener('mousemove', e => { if (tip.classList.contains('show')) moveTip(e); });
+
+// ============================================================
+// モーダル
+// ============================================================
+function openModal(el) {
+  hideTip();
+  selectedMemberId = null;
+  currentSlot = el.dataset;
+  const ids = JSON.parse(decodeURIComponent(el.dataset.ids));
+  const ms = ids.map(id => members.find(m => m.id === id)).filter(Boolean);
+
+  document.getElementById('modal-title').textContent =
+    `${el.dataset.date} (${el.dataset.day}) ${el.dataset.time} 〜`;
+  document.getElementById('assignee-list').innerHTML = ms.map(m => `
+    <div class="assignee" id="row-${m.id}" onclick="selectMember(${m.id})">
+      <div class="a-avatar" style="background:${m.bg};color:${m.color}">${m.initial}</div>
+      <div>
+        <div class="a-name">${m.name}</div>
+        <div class="a-cal">${m.calName}</div>
+      </div>
+      <span class="check">✓</span>
+    </div>`).join('');
+  document.getElementById('go-btn').disabled = true;
+  document.getElementById('overlay').classList.add('open');
+}
+
+function selectMember(id) {
+  selectedMemberId = id;
+  document.querySelectorAll('.assignee').forEach(r => r.classList.remove('selected'));
+  document.getElementById('row-' + id).classList.add('selected');
+  document.getElementById('go-btn').disabled = false;
+}
+
+function goToTimerex() {
+  const m = members.find(x => x.id === selectedMemberId);
+  if (m) window.open(m.timerexUrl, '_blank');
+}
+
+function closeModal() {
+  document.getElementById('overlay').classList.remove('open');
+}
+
+// オーバーレイ外クリックで閉じる
+document.getElementById('overlay').addEventListener('click', function(e) {
+  if (e.target === this) closeModal();
+});
+
+// ============================================================
+// 起動
+// ============================================================
+fetchAvailability();
+</script>
+</body>
+</html>
