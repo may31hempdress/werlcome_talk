@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>人事図書館ウェルカムトークご予約 | 全スタッフ空き時間まとめページ</title>
+<title>人事図書館ウェルカムトーク | 全CET空き時間まとめページ</title>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 :root {
@@ -35,10 +35,13 @@ main { max-width: 780px; margin: 0 auto; padding: 24px 16px 60px; }
 .legend-item { display: flex; align-items: center; gap: 5px; }
 .legend-dot { width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }
 .cal-wrap { background: var(--surface); border-radius: var(--radius); border: 1px solid var(--border); overflow: hidden; box-shadow: var(--shadow); }
-.cal-grid { display: grid; grid-template-columns: 52px repeat(5, 1fr); }
+.cal-grid { display: grid; grid-template-columns: 52px repeat(7, 1fr); }
 .cal-head-empty { background: #fafaf8; border-bottom: 1px solid var(--border); }
 .cal-head { background: #fafaf8; border-bottom: 1px solid var(--border); border-left: 1px solid var(--border); text-align: center; padding: 8px 4px; font-size: 11px; color: var(--text-muted); font-weight: 600; line-height: 1.5; }
 .cal-head.today { color: var(--green-dark); }
+.cal-head.sat { color: #2A6A8A; }
+.cal-head.sun { color: #A85070; }
+
 .time-label { font-size: 10px; color: var(--text-faint); display: flex; align-items: flex-start; justify-content: flex-end; padding: 4px 6px 0 0; height: 40px; border-top: 1px solid #f0efec; }
 .cal-cell { height: 40px; border-top: 1px solid #f0efec; border-left: 1px solid #f0efec; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 600; transition: transform .1s, filter .1s; cursor: default; }
 .cal-cell.empty { background: transparent; }
@@ -79,7 +82,7 @@ main { max-width: 780px; margin: 0 auto; padding: 24px 16px 60px; }
 .refresh-btn { background: none; border: none; color: var(--green-dark); font-size: 11px; cursor: pointer; text-decoration: underline; }
 #error-msg { display: none; background: #fff3f3; border: 1px solid #f5c1c1; border-radius: 8px; padding: 14px 16px; font-size: 13px; color: #a32d2d; margin-bottom: 16px; }
 @media (max-width: 480px) {
-  .cal-grid { grid-template-columns: 40px repeat(5, 1fr); }
+  .cal-grid { grid-template-columns: 40px repeat(7, 1fr); }
   .time-label { font-size: 9px; padding: 4px 4px 0 0; }
   .cal-cell { height: 36px; font-size: 9px; }
 }
@@ -204,11 +207,11 @@ function extractDatetimes(obj, results, depth) {
   }
 }
 
-var DAY_JP = ['月','火','水','木','金'];
+var DAY_JP = ["月","火","水","木","金","土","日"];
 var TIMES = [];
-for (var h = 9; h <= 18; h++) {
+for (var h = 8; h <= 23; h++) {
   TIMES.push((h < 10 ? '0' : '') + h + ':00');
-  if (h < 18) TIMES.push((h < 10 ? '0' : '') + h + ':30');
+  if (h < 23) TIMES.push((h < 10 ? '0' : '') + h + ':30');
 }
 
 var weekOffset = 0;
@@ -217,9 +220,9 @@ var selectedMemberId = null;
 
 function getWeekDates(off) {
   var t = new Date(), m = new Date(t);
-  m.setDate(t.getDate() - t.getDay() + 1 + off * 7);
+  m.setDate(t.getDate() - ((t.getDay() + 6) % 7) + off * 7);
   var result = [];
-  for (var i = 0; i < 5; i++) {
+  for (var i = 0; i < 7; i++) {
     var d = new Date(m); d.setDate(m.getDate() + i); result.push(d);
   }
   return result;
@@ -243,7 +246,8 @@ function renderCalendar() {
   for (var di = 0; di < dates.length; di++) {
     var d = dates[di];
     var isToday = d.toDateString() === today.toDateString();
-    html += '<div class="cal-head' + (isToday?' today':'') + '">' + DAY_JP[di] + '<br>' + (d.getMonth()+1) + '/' + d.getDate() + '</div>';
+    var weekend = di===5?' sat':di===6?' sun':'';
+    html += '<div class="cal-head' + (isToday?' today':weekend) + '">' + DAY_JP[di] + '<br>' + (d.getMonth()+1) + '/' + d.getDate() + '</div>';
   }
 
   for (var ti = 0; ti < TIMES.length; ti++) {
