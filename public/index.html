@@ -427,7 +427,7 @@ for (let h = 9; h <= 18; h++) {
 // ============================================================
 async function fetchAvailability() {
   try {
-    const res = await fetch(API_URL);
+    const res = await fetch(proxyUrl);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     members = data.members || [];
