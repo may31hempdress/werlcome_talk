@@ -383,14 +383,19 @@ document.getElementById('overlay').addEventListener('click', function(e) { if(e.
 (async function() {
   var detail = document.getElementById('loading-detail');
   try {
-    for (var i = 0; i < MEMBERS.length; i++) {
-      var member = MEMBERS[i];
-      detail.textContent = member.name + ' の空き時間を確認中... (' + (i+1) + '/' + MEMBERS.length + ')';
-      var slots = await fetchMemberSlots(member, 3);
+    detail.textContent = '全メンバーの空き時間を同時に取得中...';
+    // 全メンバーを並列取得
+    var allResults = await Promise.all(MEMBERS.map(function(member) {
+      return fetchMemberSlots(member, 3).then(function(slots) {
+        return { member: member, slots: slots };
+      });
+    }));
+    for (var i = 0; i < allResults.length; i++) {
+      var member = allResults[i].member;
+      var slots = allResults[i].slots;
       for (var j = 0; j < slots.length; j++) {
         var dt = slots[j];
         if (!slotMap[dt]) slotMap[dt] = [];
-        // 同じメンバーが重複して入らないようにチェック
         if (slotMap[dt].indexOf(member.id) === -1) {
           slotMap[dt].push(member.id);
         }
