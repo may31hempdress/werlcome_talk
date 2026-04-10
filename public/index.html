@@ -294,6 +294,7 @@ function renderCalendar() {
   var fmt = function(d) { return (d.getMonth()+1) + '/' + d.getDate(); };
   document.getElementById('week-label').textContent = fmt(dates[0]) + ' (月) 〜 ' + fmt(dates[6]) + ' (日)';
   document.getElementById('btn-prev').disabled = weekOffset <= 0;
+  document.getElementById('btn-next').disabled = weekOffset >= 2;
 
   var html = '<div class="cal-head-empty"></div>';
   for (var di = 0; di < 7; di++) {
