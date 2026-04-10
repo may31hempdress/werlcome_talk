@@ -34,10 +34,11 @@ main { max-width: 860px; margin: 0 auto; padding: 24px 16px 60px; }
 .legend { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 14px; font-size: 11px; color: var(--text-muted); }
 .legend-item { display: flex; align-items: center; gap: 5px; }
 .legend-dot { width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }
-.cal-wrap { background: var(--surface); border-radius: var(--radius); border: 1px solid var(--border); overflow: hidden; box-shadow: var(--shadow); }
+.cal-wrap { background: var(--surface); border-radius: var(--radius); border: 1px solid var(--border); box-shadow: var(--shadow); overflow: hidden; }
+.cal-scroll { overflow-y: auto; max-height: 65vh; }
 .cal-grid { display: grid; grid-template-columns: 52px repeat(7, 1fr); }
-.cal-head-empty { background: #fafaf8; border-bottom: 1px solid var(--border); }
-.cal-head { background: #fafaf8; border-bottom: 1px solid var(--border); border-left: 1px solid var(--border); text-align: center; padding: 8px 4px; font-size: 11px; color: var(--text-muted); font-weight: 600; line-height: 1.5; }
+.cal-head-empty { background: #fafaf8; border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 10; }
+.cal-head { background: #fafaf8; border-bottom: 1px solid var(--border); border-left: 1px solid var(--border); text-align: center; padding: 8px 4px; font-size: 11px; color: var(--text-muted); font-weight: 600; line-height: 1.5; position: sticky; top: 0; z-index: 10; }
 .cal-head.today { color: var(--green-dark); }
 .cal-head.sat { color: #2A6A8A; }
 .cal-head.sun { color: #A85070; }
@@ -125,7 +126,9 @@ main { max-width: 860px; margin: 0 auto; padding: 24px 16px 60px; }
       <span class="legend-item"><span class="legend-dot" style="background:var(--green-mid)"></span>5名以上</span>
     </div>
     <div class="cal-wrap">
-      <div class="cal-grid" id="cal-grid"></div>
+      <div class="cal-scroll">
+        <div class="cal-grid" id="cal-grid"></div>
+      </div>
     </div>
     <p class="last-updated" id="last-updated"></p>
   </div>
@@ -162,9 +165,6 @@ var MEMBERS = [
 
 var WEEKS_AHEAD = 3;
 
-// ============================================================
-// 日付ユーティリティ
-// ============================================================
 function formatDate(d) {
   var y = d.getFullYear();
   var m = ('0' + (d.getMonth()+1)).slice(-2);
@@ -184,23 +184,16 @@ function getMondayOfWeek(offsetWeeks) {
   return m;
 }
 
-// ============================================================
-// 単一リクエスト（プロキシ経由）- リトライなし・高速版
-// ============================================================
 var PROXIES = [
   function(u) { return 'https://api.allorigins.win/get?url=' + encodeURIComponent(u); },
   function(u) { return 'https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent(u); },
 ];
-var proxyIndex = 0;
 
 async function fetchOneRange(timerexUrl, startDate, endDate) {
   var base = timerexUrl.replace(/\/$/, '');
   var apiUrl = base + '/calendar_week?locale=ja&timezone=Asia%2FTokyo&start_date=' + startDate + '&end_date=' + endDate;
-
-  // 2つのプロキシを並列で投げて、先に成功した方を使う
   var p1 = fetchViaProxy(apiUrl, 0);
   var p2 = fetchViaProxy(apiUrl, 1);
-
   try {
     var json = await Promise.any([p1, p2]);
     return extractSlots(json);
@@ -236,20 +229,14 @@ function extractSlots(json) {
   return slots;
 }
 
-// ============================================================
-// 全リクエストを完全並列で一気に投げる
-// ============================================================
 async function fetchAllSlots() {
   var slotMap = {};
-
-  // 取得するレンジ一覧を作成（7人 × 3週 × 月〜金/土〜日 = 42リクエスト）
   var tasks = [];
   for (var w = 0; w < WEEKS_AHEAD; w++) {
     var mon = getMondayOfWeek(w);
     var fri = new Date(mon); fri.setDate(mon.getDate() + 4);
     var sat = new Date(mon); sat.setDate(mon.getDate() + 5);
     var sun = new Date(mon); sun.setDate(mon.getDate() + 6);
-
     for (var mi = 0; mi < MEMBERS.length; mi++) {
       (function(member, startMon, endFri, startSat, endSun) {
         tasks.push(
@@ -263,10 +250,7 @@ async function fetchAllSlots() {
       })(MEMBERS[mi], mon, fri, sat, sun);
     }
   }
-
-  // 全タスクを同時並列で実行
   var results = await Promise.allSettled(tasks);
-
   for (var i = 0; i < results.length; i++) {
     if (results[i].status !== 'fulfilled') continue;
     var memberId = results[i].value.memberId;
@@ -279,13 +263,9 @@ async function fetchAllSlots() {
       }
     }
   }
-
   return slotMap;
 }
 
-// ============================================================
-// カレンダー描画
-// ============================================================
 var DAY_JP = ['月','火','水','木','金','土','日'];
 var TIMES = [];
 for (var h = 8; h <= 23; h++) {
@@ -323,16 +303,15 @@ function renderCalendar() {
 
   var todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
 
-  // 空き枠がある最初〜最後の時間インデックスを求める
   var firstTi = -1, lastTi = -1;
   for (var ti2 = 0; ti2 < TIMES.length; ti2++) {
+    var hasSlot = false;
     for (var di3 = 0; di3 < 7; di3++) {
       if (dates[di3] >= todayStart && (slotMap[toKey(dates[di3], TIMES[ti2])] || []).length > 0) {
-        if (firstTi === -1) firstTi = ti2;
-        lastTi = ti2;
-        break;
+        hasSlot = true; break;
       }
     }
+    if (hasSlot) { if (firstTi === -1) firstTi = ti2; lastTi = ti2; }
   }
   if (firstTi === -1) { firstTi = 0; lastTi = TIMES.length - 1; }
 
@@ -368,7 +347,6 @@ function renderCalendar() {
 
 function changeWeek(dir) { weekOffset += dir; renderCalendar(); }
 
-// ツールチップ
 var tip = document.getElementById('tooltip');
 function showTip(e, el) {
   var ids = JSON.parse(decodeURIComponent(el.dataset.ids));
@@ -389,7 +367,6 @@ function moveTip(e) {
 function hideTip() { tip.classList.remove('show'); }
 document.addEventListener('mousemove', function(e) { if(tip.classList.contains('show')) moveTip(e); });
 
-// モーダル
 function openModal(el) {
   hideTip();
   selectedMemberId = null;
@@ -416,9 +393,6 @@ function goToTimerex() {
 function closeModal() { document.getElementById('overlay').classList.remove('open'); }
 document.getElementById('overlay').addEventListener('click', function(e) { if(e.target===this) closeModal(); });
 
-// ============================================================
-// 起動
-// ============================================================
 (async function() {
   var detail = document.getElementById('loading-detail');
   detail.textContent = '全メンバーの空き時間を並列取得中...';
@@ -427,7 +401,6 @@ document.getElementById('overlay').addEventListener('click', function(e) { if(e.
     var total = 0;
     var keys = Object.keys(slotMap);
     for(var k=0;k<keys.length;k++) total += slotMap[keys[k]].length;
-
     document.getElementById('loading').style.display = 'none';
     document.getElementById('calendar-area').style.display = 'block';
     document.getElementById('last-updated').innerHTML =
@@ -443,3 +416,4 @@ document.getElementById('overlay').addEventListener('click', function(e) { if(e.
 })();
 </script>
 </body>
+</html>
