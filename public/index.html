@@ -102,7 +102,7 @@ main { max-width: 860px; margin: 0 auto; padding: 24px 16px 60px; }
   <div class="notice">
     <span class="notice-icon">ℹ️</span>
     <div>
-      全員分の空き時間を順番に読み込むため、<strong>表示まで少しお時間がかかります</strong>（目安：30秒〜1分）。<br>
+      全メンバーの空き時間を順番に読み込むため、<strong>表示まで少しお時間がかかります</strong>（目安：30秒〜1分）。<br>
       空き時間が少ない・表示されない場合は、ページ下部の「<strong>更新</strong>」ボタンを押してみてください。
     </div>
   </div>
@@ -232,23 +232,32 @@ async function fetchWeekSlots(member, startDate) {
 }
 
 async function fetchMemberSlots(member, weeksAhead) {
-  // 今週から weeksAhead 週分取得
   var allSlots = [];
   var today = new Date();
   var monday = new Date(today);
   monday.setDate(today.getDate() - ((today.getDay() + 6) % 7));
 
-  var startDate = formatDate(monday);
   for (var w = 0; w < weeksAhead; w++) {
-    try {
-      var result = await fetchWeekSlots(member, w === 0 ? null : startDate);
-      allSlots = allSlots.concat(result.slots);
-      // 次の週のstartDateを計算
-      var next = new Date(monday);
-      next.setDate(monday.getDate() + (w+1)*7);
-      startDate = formatDate(next);
-    } catch(e) {
-      console.warn(member.name + ' week' + w + ': ' + e.message);
+    var next = new Date(monday);
+    next.setDate(monday.getDate() + w * 7);
+    var startDate = formatDate(next);
+
+    // 1週分を最大3回リトライ
+    var success = false;
+    for (var retry = 0; retry < 3; retry++) {
+      try {
+        var result = await fetchWeekSlots(member, w === 0 ? null : startDate);
+        // スロットが取れた、または空で正常終了した場合はOK
+        allSlots = allSlots.concat(result.slots);
+        success = true;
+        break;
+      } catch(e) {
+        console.warn(member.name + ' week' + w + ' retry' + retry + ': ' + e.message);
+        await new Promise(function(r){ setTimeout(r, 600); });
+      }
+    }
+    if (!success) {
+      console.warn(member.name + ' week' + w + ': 3回リトライしても失敗');
     }
   }
   return allSlots;
@@ -304,7 +313,24 @@ function renderCalendar() {
     html += '<div class="cal-head' + cls + '">' + DAY_JP[di] + '<br>' + (d.getMonth()+1) + '/' + d.getDate() + '</div>';
   }
 
-  for (var ti = 0; ti < TIMES.length; ti++) {
+  var todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+
+  // この週で空き枠がある最初と最後の時間インデックスを求める
+  var firstTi = -1, lastTi = -1;
+  for (var ti2 = 0; ti2 < TIMES.length; ti2++) {
+    for (var di3 = 0; di3 < 7; di3++) {
+      var dd3 = dates[di3];
+      if (dd3 >= todayStart && (slotMap[toKey(dd3, TIMES[ti2])] || []).length > 0) {
+        if (firstTi === -1) firstTi = ti2;
+        lastTi = ti2;
+        break;
+      }
+    }
+  }
+  // 空き枠が1つもない場合は全行表示
+  if (firstTi === -1) { firstTi = 0; lastTi = TIMES.length - 1; }
+
+  for (var ti = firstTi; ti <= lastTi; ti++) {
     var time = TIMES[ti];
     html += '<div class="time-label">' + time + '</div>';
     for (var di2 = 0; di2 < 7; di2++) {
@@ -312,7 +338,6 @@ function renderCalendar() {
       var key = toKey(dd, time);
       var ids = slotMap[key] || [];
       var count = ids.length;
-      var todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
       var isPast = dd < todayStart;
       if (count === 0 || isPast) {
         html += '<div class="cal-cell empty"></div>';
