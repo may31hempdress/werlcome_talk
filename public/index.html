@@ -19,7 +19,7 @@ body { font-family: 'Hiragino Sans', 'Noto Sans JP', sans-serif; background: var
 header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 16px 24px; display: flex; align-items: center; justify-content: space-between; }
 .logo { font-size: 15px; font-weight: 600; }
 .header-sub { font-size: 12px; color: var(--text-muted); }
-main { max-width: 780px; margin: 0 auto; padding: 24px 16px 60px; }
+main { max-width: 860px; margin: 0 auto; padding: 24px 16px 60px; }
 .page-title { font-size: 20px; font-weight: 600; margin-bottom: 4px; }
 .page-sub { font-size: 13px; color: var(--text-muted); margin-bottom: 20px; }
 #loading { text-align: center; padding: 60px 0; color: var(--text-muted); font-size: 14px; }
@@ -41,7 +41,6 @@ main { max-width: 780px; margin: 0 auto; padding: 24px 16px 60px; }
 .cal-head.today { color: var(--green-dark); }
 .cal-head.sat { color: #2A6A8A; }
 .cal-head.sun { color: #A85070; }
-
 .time-label { font-size: 10px; color: var(--text-faint); display: flex; align-items: flex-start; justify-content: flex-end; padding: 4px 6px 0 0; height: 40px; border-top: 1px solid #f0efec; }
 .cal-cell { height: 40px; border-top: 1px solid #f0efec; border-left: 1px solid #f0efec; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 600; transition: transform .1s, filter .1s; cursor: default; }
 .cal-cell.empty { background: transparent; }
@@ -81,17 +80,18 @@ main { max-width: 780px; margin: 0 auto; padding: 24px 16px 60px; }
 .last-updated { text-align: center; font-size: 11px; color: var(--text-faint); margin-top: 12px; }
 .refresh-btn { background: none; border: none; color: var(--green-dark); font-size: 11px; cursor: pointer; text-decoration: underline; }
 #error-msg { display: none; background: #fff3f3; border: 1px solid #f5c1c1; border-radius: 8px; padding: 14px 16px; font-size: 13px; color: #a32d2d; margin-bottom: 16px; }
-@media (max-width: 480px) {
+@media (max-width: 600px) {
   .cal-grid { grid-template-columns: 40px repeat(7, 1fr); }
-  .time-label { font-size: 9px; padding: 4px 4px 0 0; }
+  .time-label { font-size: 9px; padding: 4px 3px 0 0; }
   .cal-cell { height: 36px; font-size: 9px; }
+  .cal-head { font-size: 10px; padding: 6px 2px; }
 }
 </style>
 </head>
 <body>
 <header>
-  <div class="logo">ご予約</div>
-  <div class="header-sub">担当スタッフの空き時間</div>
+  <div class="logo">人事図書館ウェルカムトーク</div>
+  <div class="header-sub">全CET空き時間まとめページ</div>
 </header>
 <main>
   <h1 class="page-title">空き時間を選んでご予約ください</h1>
@@ -140,7 +140,7 @@ main { max-width: 780px; margin: 0 auto; padding: 24px 16px 60px; }
 </div>
 
 <script>
-const MEMBERS = [
+var MEMBERS = [
   { id:1, name:'しほっぺ',   calName:'しほっぺ',   initial:'し', color:'#7A6248', bg:'#F5EFE6', timerexUrl:'https://timerex.net/s/amagaeru0619_012f/59b3fcea' },
   { id:2, name:'みつ',       calName:'みつ',       initial:'み', color:'#2D5A3D', bg:'#D6EAD8', timerexUrl:'https://timerex.net/s/mitsutaka.okamoto_85f3/7bf6cc7c' },
   { id:3, name:'もも',       calName:'もも',       initial:'も', color:'#A85070', bg:'#FAE4EC', timerexUrl:'https://timerex.net/s/hr-library-membermtg/d5374711' },
@@ -150,68 +150,85 @@ const MEMBERS = [
   { id:7, name:'えのも',     calName:'えのも',     initial:'え', color:'#9A6200', bg:'#FFF0C2', timerexUrl:'https://timerex.net/s/en0m000000_77a9/ee307627' },
 ];
 
-async function fetchTimerexSlots(member) {
-  try {
-    var url = 'https://api.allorigins.win/get?url=' + encodeURIComponent(member.timerexUrl);
-    var res = await fetch(url);
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    var data = await res.json();
-    var html = data.contents || '';
-    var slots = [];
+// ============================================================
+// Timerexの calendar_week APIを呼び出す（複数週を取得）
+// ============================================================
+function getCalendarApiUrl(timerexUrl, startDate) {
+  // startDate: "20260410" 形式
+  var base = timerexUrl.replace(/\/$/, '');
+  var url = base + '/calendar_week?locale=ja&timezone=Asia%2FTokyo';
+  if (startDate) url += '&start_date=' + startDate;
+  return url;
+}
 
-    var match = html.match(/<script id="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/);
-    if (match) {
-      try {
-        var nextData = JSON.parse(match[1]);
-        extractDatetimes(nextData, slots, 0);
-      } catch(e) {}
-    }
+function formatDate(d) {
+  var y = d.getFullYear();
+  var m = ('0' + (d.getMonth()+1)).slice(-2);
+  var day = ('0' + d.getDate()).slice(-2);
+  return y + '' + m + '' + day;
+}
 
-    if (slots.length === 0) {
-      var pattern = /(\d{4}-\d{2}-\d{2}T\d{2}:\d{2})/g;
-      var m;
-      var seen = {};
-      while ((m = pattern.exec(html)) !== null) {
-        var dt = m[1].substring(0, 16);
-        if (!seen[dt] && new Date(dt) > new Date()) {
-          seen[dt] = true;
-          slots.push(dt);
+// start_datetime "2026/04/12 18:30:00" → "2026-04-12T18:30"
+function parseSlotDatetime(str) {
+  // "2026/04/12 18:30:00"
+  var p = str.replace(/\//g, '-').replace(' ', 'T');
+  return p.substring(0, 16); // "2026-04-12T18:30"
+}
+
+async function fetchWeekSlots(member, startDate) {
+  var apiUrl = getCalendarApiUrl(member.timerexUrl, startDate);
+  var proxyUrl = 'https://api.allorigins.win/get?url=' + encodeURIComponent(apiUrl);
+  var res = await fetch(proxyUrl);
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  var data = await res.json();
+  var json = JSON.parse(data.contents);
+  var slots = [];
+  if (json && json.slots) {
+    var days = Object.keys(json.slots);
+    for (var i = 0; i < days.length; i++) {
+      var daySlots = json.slots[days[i]];
+      for (var j = 0; j < daySlots.length; j++) {
+        var s = daySlots[j];
+        if (!s.disable && s.start_datetime) {
+          slots.push(parseSlotDatetime(s.start_datetime));
         }
       }
     }
-
-    // 重複除去
-    var unique = [];
-    var seenSet = {};
-    for (var i = 0; i < slots.length; i++) {
-      if (!seenSet[slots[i]]) { seenSet[slots[i]] = true; unique.push(slots[i]); }
-    }
-    return unique;
-  } catch(e) {
-    console.warn(member.name + ': 取得失敗', e.message);
-    return [];
   }
+  return { slots: slots, nextUrl: json ? json.next_url : null };
 }
 
-function extractDatetimes(obj, results, depth) {
-  if (depth > 12 || !obj || typeof obj !== 'object') return;
-  var keys = Object.keys(obj);
-  for (var i = 0; i < keys.length; i++) {
-    var val = obj[keys[i]];
-    if (typeof val === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(val)) {
-      var dt = val.substring(0, 16);
-      if (new Date(dt) > new Date()) results.push(dt);
-    } else if (typeof val === 'object') {
-      extractDatetimes(val, results, depth + 1);
+async function fetchMemberSlots(member, weeksAhead) {
+  // 今週から weeksAhead 週分取得
+  var allSlots = [];
+  var today = new Date();
+  var monday = new Date(today);
+  monday.setDate(today.getDate() - ((today.getDay() + 6) % 7));
+
+  var startDate = formatDate(monday);
+  for (var w = 0; w < weeksAhead; w++) {
+    try {
+      var result = await fetchWeekSlots(member, w === 0 ? null : startDate);
+      allSlots = allSlots.concat(result.slots);
+      // 次の週のstartDateを計算
+      var next = new Date(monday);
+      next.setDate(monday.getDate() + (w+1)*7);
+      startDate = formatDate(next);
+    } catch(e) {
+      console.warn(member.name + ' week' + w + ': ' + e.message);
     }
   }
+  return allSlots;
 }
 
-var DAY_JP = ["月","火","水","木","金","土","日"];
+// ============================================================
+// カレンダー描画
+// ============================================================
+var DAY_JP = ['月','火','水','木','金','土','日'];
 var TIMES = [];
 for (var h = 8; h <= 23; h++) {
-  TIMES.push((h < 10 ? '0' : '') + h + ':00');
-  if (h < 23) TIMES.push((h < 10 ? '0' : '') + h + ':30');
+  TIMES.push(('0'+h).slice(-2) + ':00');
+  if (h < 23) TIMES.push(('0'+h).slice(-2) + ':30');
 }
 
 var weekOffset = 0;
@@ -219,19 +236,22 @@ var slotMap = {};
 var selectedMemberId = null;
 
 function getWeekDates(off) {
-  var t = new Date(), m = new Date(t);
+  var t = new Date();
+  var m = new Date(t);
   m.setDate(t.getDate() - ((t.getDay() + 6) % 7) + off * 7);
   var result = [];
   for (var i = 0; i < 7; i++) {
-    var d = new Date(m); d.setDate(m.getDate() + i); result.push(d);
+    var d = new Date(m);
+    d.setDate(m.getDate() + i);
+    result.push(d);
   }
   return result;
 }
 
 function toKey(date, time) {
   var y = date.getFullYear();
-  var mo = (date.getMonth()+1 < 10 ? '0' : '') + (date.getMonth()+1);
-  var d = (date.getDate() < 10 ? '0' : '') + date.getDate();
+  var mo = ('0'+(date.getMonth()+1)).slice(-2);
+  var d = ('0'+date.getDate()).slice(-2);
   return y + '-' + mo + '-' + d + 'T' + time;
 }
 
@@ -239,21 +259,21 @@ function renderCalendar() {
   var dates = getWeekDates(weekOffset);
   var today = new Date();
   var fmt = function(d) { return (d.getMonth()+1) + '/' + d.getDate(); };
-  document.getElementById('week-label').textContent = fmt(dates[0]) + ' (月) 〜 ' + fmt(dates[4]) + ' (金)';
+  document.getElementById('week-label').textContent = fmt(dates[0]) + ' (月) 〜 ' + fmt(dates[6]) + ' (日)';
   document.getElementById('btn-prev').disabled = weekOffset <= 0;
 
   var html = '<div class="cal-head-empty"></div>';
-  for (var di = 0; di < dates.length; di++) {
+  for (var di = 0; di < 7; di++) {
     var d = dates[di];
     var isToday = d.toDateString() === today.toDateString();
-    var weekend = di===5?' sat':di===6?' sun':'';
-    html += '<div class="cal-head' + (isToday?' today':weekend) + '">' + DAY_JP[di] + '<br>' + (d.getMonth()+1) + '/' + d.getDate() + '</div>';
+    var cls = isToday ? ' today' : (di === 5 ? ' sat' : (di === 6 ? ' sun' : ''));
+    html += '<div class="cal-head' + cls + '">' + DAY_JP[di] + '<br>' + (d.getMonth()+1) + '/' + d.getDate() + '</div>';
   }
 
   for (var ti = 0; ti < TIMES.length; ti++) {
     var time = TIMES[ti];
     html += '<div class="time-label">' + time + '</div>';
-    for (var di2 = 0; di2 < dates.length; di2++) {
+    for (var di2 = 0; di2 < 7; di2++) {
       var dd = dates[di2];
       var key = toKey(dd, time);
       var ids = slotMap[key] || [];
@@ -263,10 +283,10 @@ function renderCalendar() {
       if (count === 0 || isPast) {
         html += '<div class="cal-cell empty"></div>';
       } else {
-        var cls = count===1?'a1':count===2?'a2':count<=4?'a3':count<=6?'a4':'a5plus';
+        var cls2 = count===1?'a1':count===2?'a2':count<=4?'a3':count<=6?'a4':'a5plus';
         var idsEnc = encodeURIComponent(JSON.stringify(ids));
         var dateStr = (dd.getMonth()+1) + '/' + dd.getDate();
-        html += '<div class="cal-cell ' + cls + '" data-ids="' + idsEnc + '" data-date="' + dateStr + '" data-day="' + DAY_JP[di2] + '" data-time="' + time + '" onmouseenter="showTip(event,this)" onmouseleave="hideTip()" onclick="openModal(this)">' + count + '名</div>';
+        html += '<div class="cal-cell ' + cls2 + '" data-ids="' + idsEnc + '" data-date="' + dateStr + '" data-day="' + DAY_JP[di2] + '" data-time="' + time + '" onmouseenter="showTip(event,this)" onmouseleave="hideTip()" onclick="openModal(this)">' + count + '名</div>';
       }
     }
   }
@@ -275,10 +295,11 @@ function renderCalendar() {
 
 function changeWeek(dir) { weekOffset += dir; renderCalendar(); }
 
+// ツールチップ
 var tip = document.getElementById('tooltip');
 function showTip(e, el) {
   var ids = JSON.parse(decodeURIComponent(el.dataset.ids));
-  var ms = ids.map(function(id) { return MEMBERS.filter(function(m){return m.id===id;})[0]; }).filter(Boolean);
+  var ms = ids.map(function(id) { for(var i=0;i<MEMBERS.length;i++){if(MEMBERS[i].id===id)return MEMBERS[i];} }).filter(Boolean);
   document.getElementById('tt-header').textContent = el.dataset.date + ' (' + el.dataset.day + ') ' + el.dataset.time + '〜';
   document.getElementById('tt-body').innerHTML = ms.map(function(m) {
     return '<div class="tt-member"><div class="tt-avatar" style="background:' + m.bg + ';color:' + m.color + '">' + m.initial + '</div><div><div class="tt-name">' + m.name + '</div><div class="tt-cal">' + m.calName + '</div></div></div>';
@@ -295,11 +316,12 @@ function moveTip(e) {
 function hideTip() { tip.classList.remove('show'); }
 document.addEventListener('mousemove', function(e) { if(tip.classList.contains('show')) moveTip(e); });
 
+// モーダル
 function openModal(el) {
   hideTip();
   selectedMemberId = null;
   var ids = JSON.parse(decodeURIComponent(el.dataset.ids));
-  var ms = ids.map(function(id){ return MEMBERS.filter(function(m){return m.id===id;})[0]; }).filter(Boolean);
+  var ms = ids.map(function(id){ for(var i=0;i<MEMBERS.length;i++){if(MEMBERS[i].id===id)return MEMBERS[i];} }).filter(Boolean);
   document.getElementById('modal-title').textContent = el.dataset.date + ' (' + el.dataset.day + ') ' + el.dataset.time + '〜';
   document.getElementById('assignee-list').innerHTML = ms.map(function(m) {
     return '<div class="assignee" id="row-' + m.id + '" onclick="selectMember(' + m.id + ')"><div class="a-avatar" style="background:' + m.bg + ';color:' + m.color + '">' + m.initial + '</div><div><div class="a-name">' + m.name + '</div><div class="a-cal">' + m.calName + '</div></div><span class="check">✓</span></div>';
@@ -314,20 +336,23 @@ function selectMember(id) {
   document.getElementById('go-btn').disabled = false;
 }
 function goToTimerex() {
-  var m = MEMBERS.filter(function(x){ return x.id === selectedMemberId; })[0];
+  var m = null;
+  for(var i=0;i<MEMBERS.length;i++){if(MEMBERS[i].id===selectedMemberId){m=MEMBERS[i];break;}}
   if (m) window.open(m.timerexUrl, '_blank');
 }
 function closeModal() { document.getElementById('overlay').classList.remove('open'); }
 document.getElementById('overlay').addEventListener('click', function(e) { if(e.target===this) closeModal(); });
 
-// 起動
+// ============================================================
+// 起動：全メンバーの4週分を取得
+// ============================================================
 (async function() {
+  var detail = document.getElementById('loading-detail');
   try {
-    var detail = document.getElementById('loading-detail');
     for (var i = 0; i < MEMBERS.length; i++) {
       var member = MEMBERS[i];
       detail.textContent = member.name + ' の空き時間を確認中... (' + (i+1) + '/' + MEMBERS.length + ')';
-      var slots = await fetchTimerexSlots(member);
+      var slots = await fetchMemberSlots(member, 4);
       for (var j = 0; j < slots.length; j++) {
         var dt = slots[j];
         if (!slotMap[dt]) slotMap[dt] = [];
@@ -335,16 +360,20 @@ document.getElementById('overlay').addEventListener('click', function(e) { if(e.
       }
     }
     var total = 0;
-    Object.keys(slotMap).forEach(function(k){ total += slotMap[k].length; });
+    var keys = Object.keys(slotMap);
+    for(var k=0;k<keys.length;k++) total += slotMap[keys[k]].length;
+
     document.getElementById('loading').style.display = 'none';
     document.getElementById('calendar-area').style.display = 'block';
-    document.getElementById('last-updated').innerHTML = '取得完了: ' + new Date().toLocaleString('ja-JP') + ' (' + total + 'スロット) &nbsp;·&nbsp; <button class="refresh-btn" onclick="location.reload()">更新</button>';
+    document.getElementById('last-updated').innerHTML =
+      '取得完了: ' + new Date().toLocaleString('ja-JP') + ' (' + total + 'スロット) &nbsp;·&nbsp; <button class="refresh-btn" onclick="location.reload()">更新</button>';
     renderCalendar();
   } catch(e) {
     document.getElementById('loading').style.display = 'none';
     var err = document.getElementById('error-msg');
     err.style.display = 'block';
     err.textContent = '読み込みに失敗しました: ' + e.message;
+    console.error(e);
   }
 })();
 </script>
