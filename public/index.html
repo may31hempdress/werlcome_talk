@@ -237,28 +237,30 @@ async function fetchMemberSlots(member, weeksAhead) {
   var monday = new Date(today);
   monday.setDate(today.getDate() - ((today.getDay() + 6) % 7));
 
+  // 月〜金 と 土〜日 を別々に取得（TimerexのAPIは5日分しか返さないため）
+  var dateRanges = [];
   for (var w = 0; w < weeksAhead; w++) {
-    var next = new Date(monday);
-    next.setDate(monday.getDate() + w * 7);
-    var startDate = formatDate(next);
+    var mon = new Date(monday); mon.setDate(monday.getDate() + w * 7);
+    var sat = new Date(mon); sat.setDate(mon.getDate() + 5);
+    dateRanges.push({ start: formatDate(mon), end: formatDate(new Date(mon.getFullYear(), mon.getMonth(), mon.getDate() + 4)) });
+    dateRanges.push({ start: formatDate(sat), end: formatDate(new Date(sat.getFullYear(), sat.getMonth(), sat.getDate() + 1)) });
+  }
 
-    // 1週分を最大3回リトライ
+  for (var i = 0; i < dateRanges.length; i++) {
+    var startDate = dateRanges[i].start;
     var success = false;
     for (var retry = 0; retry < 3; retry++) {
       try {
-        var result = await fetchWeekSlots(member, w === 0 ? null : startDate);
-        // スロットが取れた、または空で正常終了した場合はOK
+        var result = await fetchWeekSlots(member, startDate);
         allSlots = allSlots.concat(result.slots);
         success = true;
         break;
       } catch(e) {
-        console.warn(member.name + ' week' + w + ' retry' + retry + ': ' + e.message);
+        console.warn(member.name + ' range' + i + ' retry' + retry + ': ' + e.message);
         await new Promise(function(r){ setTimeout(r, 600); });
       }
     }
-    if (!success) {
-      console.warn(member.name + ' week' + w + ': 3回リトライしても失敗');
-    }
+    if (!success) console.warn(member.name + ' range' + i + ': 失敗');
   }
   return allSlots;
 }
