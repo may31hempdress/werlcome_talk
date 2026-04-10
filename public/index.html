@@ -160,109 +160,127 @@ var MEMBERS = [
   { id:7, name:'えのも',     calName:'えのも',     initial:'え', color:'#9A6200', bg:'#FFF0C2', timerexUrl:'https://timerex.net/s/en0m000000_77a9/ee307627' },
 ];
 
-// ============================================================
-// Timerexの calendar_week APIを呼び出す（複数週を取得）
-// ============================================================
-function getCalendarApiUrl(timerexUrl, startDate) {
-  // startDate: "20260410" 形式
-  var base = timerexUrl.replace(/\/$/, '');
-  var url = base + '/calendar_week?locale=ja&timezone=Asia%2FTokyo';
-  if (startDate) url += '&start_date=' + startDate;
-  return url;
-}
+var WEEKS_AHEAD = 3;
 
+// ============================================================
+// 日付ユーティリティ
+// ============================================================
 function formatDate(d) {
   var y = d.getFullYear();
   var m = ('0' + (d.getMonth()+1)).slice(-2);
   var day = ('0' + d.getDate()).slice(-2);
-  return y + '' + m + '' + day;
+  return y + m + day;
 }
 
-// start_datetime "2026/04/12 18:30:00" → "2026-04-12T18:30"
 function parseSlotDatetime(str) {
-  // "2026/04/12 18:30:00"
-  var p = str.replace(/\//g, '-').replace(' ', 'T');
-  return p.substring(0, 16); // "2026-04-12T18:30"
+  return str.replace(/\//g, '-').replace(' ', 'T').substring(0, 16);
 }
 
-// プロキシを複数用意して順番に試す
+function getMondayOfWeek(offsetWeeks) {
+  var t = new Date();
+  var m = new Date(t);
+  m.setHours(0,0,0,0);
+  m.setDate(t.getDate() - ((t.getDay() + 6) % 7) + offsetWeeks * 7);
+  return m;
+}
+
+// ============================================================
+// 単一リクエスト（プロキシ経由）- リトライなし・高速版
+// ============================================================
 var PROXIES = [
-  function(url) { return 'https://api.allorigins.win/get?url=' + encodeURIComponent(url); },
-  function(url) { return 'https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent(url); },
+  function(u) { return 'https://api.allorigins.win/get?url=' + encodeURIComponent(u); },
+  function(u) { return 'https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent(u); },
 ];
+var proxyIndex = 0;
 
-async function fetchWithRetry(apiUrl, retries) {
-  for (var attempt = 0; attempt < retries; attempt++) {
-    var proxyFn = PROXIES[attempt % PROXIES.length];
-    var proxyUrl = proxyFn(apiUrl);
-    try {
-      var res = await fetch(proxyUrl);
-      if (!res.ok) continue;
-      var data = await res.json();
-      // alloriginsは {contents: "..."} 形式、codetabsは直接JSONを返す
-      var jsonStr = typeof data.contents !== 'undefined' ? data.contents : JSON.stringify(data);
-      var json = typeof jsonStr === 'string' ? JSON.parse(jsonStr) : jsonStr;
-      if (json && json.slots) return json;
-    } catch(e) {
-      console.warn('attempt ' + attempt + ' failed: ' + e.message);
-    }
-    // 少し待ってリトライ
-    await new Promise(function(r){ setTimeout(r, 800); });
+async function fetchOneRange(timerexUrl, startDate, endDate) {
+  var base = timerexUrl.replace(/\/$/, '');
+  var apiUrl = base + '/calendar_week?locale=ja&timezone=Asia%2FTokyo&start_date=' + startDate + '&end_date=' + endDate;
+
+  // 2つのプロキシを並列で投げて、先に成功した方を使う
+  var p1 = fetchViaProxy(apiUrl, 0);
+  var p2 = fetchViaProxy(apiUrl, 1);
+
+  try {
+    var json = await Promise.any([p1, p2]);
+    return extractSlots(json);
+  } catch(e) {
+    return [];
   }
-  return null;
 }
 
-async function fetchWeekSlots(member, startDate) {
-  var apiUrl = getCalendarApiUrl(member.timerexUrl, startDate);
-  var json = await fetchWithRetry(apiUrl, 4);
+async function fetchViaProxy(apiUrl, idx) {
+  var proxyUrl = PROXIES[idx](apiUrl);
+  var res = await fetch(proxyUrl);
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  var data = await res.json();
+  var jsonStr = typeof data.contents !== 'undefined' ? data.contents : JSON.stringify(data);
+  var json = typeof jsonStr === 'string' ? JSON.parse(jsonStr) : jsonStr;
+  if (!json || !json.slots) throw new Error('no slots');
+  return json;
+}
+
+function extractSlots(json) {
   var slots = [];
-  if (json && json.slots) {
-    var days = Object.keys(json.slots);
-    for (var i = 0; i < days.length; i++) {
-      var daySlots = json.slots[days[i]];
-      for (var j = 0; j < daySlots.length; j++) {
-        var s = daySlots[j];
-        if (!s.disable && s.start_datetime) {
-          slots.push(parseSlotDatetime(s.start_datetime));
-        }
+  if (!json || !json.slots) return slots;
+  var days = Object.keys(json.slots);
+  for (var i = 0; i < days.length; i++) {
+    var daySlots = json.slots[days[i]];
+    for (var j = 0; j < daySlots.length; j++) {
+      var s = daySlots[j];
+      if (!s.disable && s.start_datetime) {
+        slots.push(parseSlotDatetime(s.start_datetime));
       }
     }
   }
-  return { slots: slots, nextUrl: json ? json.next_url : null };
+  return slots;
 }
 
-async function fetchMemberSlots(member, weeksAhead) {
-  var allSlots = [];
-  var today = new Date();
-  var monday = new Date(today);
-  monday.setDate(today.getDate() - ((today.getDay() + 6) % 7));
+// ============================================================
+// 全リクエストを完全並列で一気に投げる
+// ============================================================
+async function fetchAllSlots() {
+  var slotMap = {};
 
-  // 月〜金 と 土〜日 を別々に取得（TimerexのAPIは5日分しか返さないため）
-  var dateRanges = [];
-  for (var w = 0; w < weeksAhead; w++) {
-    var mon = new Date(monday); mon.setDate(monday.getDate() + w * 7);
+  // 取得するレンジ一覧を作成（7人 × 3週 × 月〜金/土〜日 = 42リクエスト）
+  var tasks = [];
+  for (var w = 0; w < WEEKS_AHEAD; w++) {
+    var mon = getMondayOfWeek(w);
+    var fri = new Date(mon); fri.setDate(mon.getDate() + 4);
     var sat = new Date(mon); sat.setDate(mon.getDate() + 5);
-    dateRanges.push({ start: formatDate(mon), end: formatDate(new Date(mon.getFullYear(), mon.getMonth(), mon.getDate() + 4)) });
-    dateRanges.push({ start: formatDate(sat), end: formatDate(new Date(sat.getFullYear(), sat.getMonth(), sat.getDate() + 1)) });
+    var sun = new Date(mon); sun.setDate(mon.getDate() + 6);
+
+    for (var mi = 0; mi < MEMBERS.length; mi++) {
+      (function(member, startMon, endFri, startSat, endSun) {
+        tasks.push(
+          fetchOneRange(member.timerexUrl, formatDate(startMon), formatDate(endFri))
+            .then(function(slots) { return { memberId: member.id, slots: slots }; })
+        );
+        tasks.push(
+          fetchOneRange(member.timerexUrl, formatDate(startSat), formatDate(endSun))
+            .then(function(slots) { return { memberId: member.id, slots: slots }; })
+        );
+      })(MEMBERS[mi], mon, fri, sat, sun);
+    }
   }
 
-  for (var i = 0; i < dateRanges.length; i++) {
-    var startDate = dateRanges[i].start;
-    var success = false;
-    for (var retry = 0; retry < 3; retry++) {
-      try {
-        var result = await fetchWeekSlots(member, startDate);
-        allSlots = allSlots.concat(result.slots);
-        success = true;
-        break;
-      } catch(e) {
-        console.warn(member.name + ' range' + i + ' retry' + retry + ': ' + e.message);
-        await new Promise(function(r){ setTimeout(r, 600); });
+  // 全タスクを同時並列で実行
+  var results = await Promise.allSettled(tasks);
+
+  for (var i = 0; i < results.length; i++) {
+    if (results[i].status !== 'fulfilled') continue;
+    var memberId = results[i].value.memberId;
+    var slots = results[i].value.slots;
+    for (var j = 0; j < slots.length; j++) {
+      var dt = slots[j];
+      if (!slotMap[dt]) slotMap[dt] = [];
+      if (slotMap[dt].indexOf(memberId) === -1) {
+        slotMap[dt].push(memberId);
       }
     }
-    if (!success) console.warn(member.name + ' range' + i + ': 失敗');
   }
-  return allSlots;
+
+  return slotMap;
 }
 
 // ============================================================
@@ -280,14 +298,10 @@ var slotMap = {};
 var selectedMemberId = null;
 
 function getWeekDates(off) {
-  var t = new Date();
-  var m = new Date(t);
-  m.setDate(t.getDate() - ((t.getDay() + 6) % 7) + off * 7);
+  var m = getMondayOfWeek(off);
   var result = [];
   for (var i = 0; i < 7; i++) {
-    var d = new Date(m);
-    d.setDate(m.getDate() + i);
-    result.push(d);
+    var d = new Date(m); d.setDate(m.getDate() + i); result.push(d);
   }
   return result;
 }
@@ -305,7 +319,22 @@ function renderCalendar() {
   var fmt = function(d) { return (d.getMonth()+1) + '/' + d.getDate(); };
   document.getElementById('week-label').textContent = fmt(dates[0]) + ' (月) 〜 ' + fmt(dates[6]) + ' (日)';
   document.getElementById('btn-prev').disabled = weekOffset <= 0;
-  document.getElementById('btn-next').disabled = weekOffset >= 2;
+  document.getElementById('btn-next').disabled = weekOffset >= WEEKS_AHEAD - 1;
+
+  var todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+
+  // 空き枠がある最初〜最後の時間インデックスを求める
+  var firstTi = -1, lastTi = -1;
+  for (var ti2 = 0; ti2 < TIMES.length; ti2++) {
+    for (var di3 = 0; di3 < 7; di3++) {
+      if (dates[di3] >= todayStart && (slotMap[toKey(dates[di3], TIMES[ti2])] || []).length > 0) {
+        if (firstTi === -1) firstTi = ti2;
+        lastTi = ti2;
+        break;
+      }
+    }
+  }
+  if (firstTi === -1) { firstTi = 0; lastTi = TIMES.length - 1; }
 
   var html = '<div class="cal-head-empty"></div>';
   for (var di = 0; di < 7; di++) {
@@ -314,23 +343,6 @@ function renderCalendar() {
     var cls = isToday ? ' today' : (di === 5 ? ' sat' : (di === 6 ? ' sun' : ''));
     html += '<div class="cal-head' + cls + '">' + DAY_JP[di] + '<br>' + (d.getMonth()+1) + '/' + d.getDate() + '</div>';
   }
-
-  var todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-
-  // この週で空き枠がある最初と最後の時間インデックスを求める
-  var firstTi = -1, lastTi = -1;
-  for (var ti2 = 0; ti2 < TIMES.length; ti2++) {
-    for (var di3 = 0; di3 < 7; di3++) {
-      var dd3 = dates[di3];
-      if (dd3 >= todayStart && (slotMap[toKey(dd3, TIMES[ti2])] || []).length > 0) {
-        if (firstTi === -1) firstTi = ti2;
-        lastTi = ti2;
-        break;
-      }
-    }
-  }
-  // 空き枠が1つもない場合は全行表示
-  if (firstTi === -1) { firstTi = 0; lastTi = TIMES.length - 1; }
 
   for (var ti = firstTi; ti <= lastTi; ti++) {
     var time = TIMES[ti];
@@ -405,29 +417,13 @@ function closeModal() { document.getElementById('overlay').classList.remove('ope
 document.getElementById('overlay').addEventListener('click', function(e) { if(e.target===this) closeModal(); });
 
 // ============================================================
-// 起動：全メンバーの4週分を取得
+// 起動
 // ============================================================
 (async function() {
   var detail = document.getElementById('loading-detail');
+  detail.textContent = '全メンバーの空き時間を並列取得中...';
   try {
-    detail.textContent = '全メンバーの空き時間を同時に取得中...';
-    // 全メンバーを並列取得
-    var allResults = await Promise.all(MEMBERS.map(function(member) {
-      return fetchMemberSlots(member, 3).then(function(slots) {
-        return { member: member, slots: slots };
-      });
-    }));
-    for (var i = 0; i < allResults.length; i++) {
-      var member = allResults[i].member;
-      var slots = allResults[i].slots;
-      for (var j = 0; j < slots.length; j++) {
-        var dt = slots[j];
-        if (!slotMap[dt]) slotMap[dt] = [];
-        if (slotMap[dt].indexOf(member.id) === -1) {
-          slotMap[dt].push(member.id);
-        }
-      }
-    }
+    slotMap = await fetchAllSlots();
     var total = 0;
     var keys = Object.keys(slotMap);
     for(var k=0;k<keys.length;k++) total += slotMap[keys[k]].length;
@@ -447,4 +443,3 @@ document.getElementById('overlay').addEventListener('click', function(e) { if(e.
 })();
 </script>
 </body>
-</html>
