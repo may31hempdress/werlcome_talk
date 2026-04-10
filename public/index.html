@@ -79,6 +79,9 @@ main { max-width: 860px; margin: 0 auto; padding: 24px 16px 60px; }
 .go-btn:disabled { background: #ccc; color: #888; cursor: not-allowed; }
 .last-updated { text-align: center; font-size: 11px; color: var(--text-faint); margin-top: 12px; }
 .refresh-btn { background: none; border: none; color: var(--green-dark); font-size: 11px; cursor: pointer; text-decoration: underline; }
+.notice { display: flex; align-items: flex-start; gap: 10px; background: #FFF9EC; border: 1px solid #F5D88A; border-radius: 8px; padding: 12px 14px; margin-bottom: 20px; font-size: 13px; color: #5a4a1a; line-height: 1.7; }
+.notice-icon { font-size: 16px; flex-shrink: 0; margin-top: 1px; }
+.notice strong { color: #3a2e00; }
 #error-msg { display: none; background: #fff3f3; border: 1px solid #f5c1c1; border-radius: 8px; padding: 14px 16px; font-size: 13px; color: #a32d2d; margin-bottom: 16px; }
 @media (max-width: 600px) {
   .cal-grid { grid-template-columns: 40px repeat(7, 1fr); }
@@ -96,6 +99,13 @@ main { max-width: 860px; margin: 0 auto; padding: 24px 16px 60px; }
 <main>
   <h1 class="page-title">空き時間を選んでご予約ください</h1>
   <p class="page-sub">誰かしら空いている時間帯が表示されます。クリックして担当者を選択し、Timerexで予約を確定してください。</p>
+  <div class="notice">
+    <span class="notice-icon">ℹ️</span>
+    <div>
+      全メンバーの空き時間を順番に読み込むため、<strong>表示まで少しお時間がかかります</strong>（目安：30秒〜1分）。<br>
+      空き時間が少ない・表示されない場合は、ページ下部の「<strong>更新</strong>」ボタンを押してみてください。
+    </div>
+  </div>
   <div id="error-msg"></div>
   <div id="loading">
     <div class="spinner"></div>
@@ -175,13 +185,36 @@ function parseSlotDatetime(str) {
   return p.substring(0, 16); // "2026-04-12T18:30"
 }
 
+// プロキシを複数用意して順番に試す
+var PROXIES = [
+  function(url) { return 'https://api.allorigins.win/get?url=' + encodeURIComponent(url); },
+  function(url) { return 'https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent(url); },
+];
+
+async function fetchWithRetry(apiUrl, retries) {
+  for (var attempt = 0; attempt < retries; attempt++) {
+    var proxyFn = PROXIES[attempt % PROXIES.length];
+    var proxyUrl = proxyFn(apiUrl);
+    try {
+      var res = await fetch(proxyUrl);
+      if (!res.ok) continue;
+      var data = await res.json();
+      // alloriginsは {contents: "..."} 形式、codetabsは直接JSONを返す
+      var jsonStr = typeof data.contents !== 'undefined' ? data.contents : JSON.stringify(data);
+      var json = typeof jsonStr === 'string' ? JSON.parse(jsonStr) : jsonStr;
+      if (json && json.slots) return json;
+    } catch(e) {
+      console.warn('attempt ' + attempt + ' failed: ' + e.message);
+    }
+    // 少し待ってリトライ
+    await new Promise(function(r){ setTimeout(r, 800); });
+  }
+  return null;
+}
+
 async function fetchWeekSlots(member, startDate) {
   var apiUrl = getCalendarApiUrl(member.timerexUrl, startDate);
-  var proxyUrl = 'https://api.allorigins.win/get?url=' + encodeURIComponent(apiUrl);
-  var res = await fetch(proxyUrl);
-  if (!res.ok) throw new Error('HTTP ' + res.status);
-  var data = await res.json();
-  var json = JSON.parse(data.contents);
+  var json = await fetchWithRetry(apiUrl, 4);
   var slots = [];
   if (json && json.slots) {
     var days = Object.keys(json.slots);
