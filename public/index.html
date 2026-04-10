@@ -385,7 +385,7 @@ document.getElementById('overlay').addEventListener('click', function(e) { if(e.
     for (var i = 0; i < MEMBERS.length; i++) {
       var member = MEMBERS[i];
       detail.textContent = member.name + ' の空き時間を確認中... (' + (i+1) + '/' + MEMBERS.length + ')';
-      var slots = await fetchMemberSlots(member, 4);
+      var slots = await fetchMemberSlots(member, 3);
       for (var j = 0; j < slots.length; j++) {
         var dt = slots[j];
         if (!slotMap[dt]) slotMap[dt] = [];
