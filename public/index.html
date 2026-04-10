@@ -356,7 +356,10 @@ document.getElementById('overlay').addEventListener('click', function(e) { if(e.
       for (var j = 0; j < slots.length; j++) {
         var dt = slots[j];
         if (!slotMap[dt]) slotMap[dt] = [];
-        slotMap[dt].push(member.id);
+        // 同じメンバーが重複して入らないようにチェック
+        if (slotMap[dt].indexOf(member.id) === -1) {
+          slotMap[dt].push(member.id);
+        }
       }
     }
     var total = 0;
